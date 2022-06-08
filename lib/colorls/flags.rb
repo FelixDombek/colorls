@@ -2,7 +2,6 @@
 
 require 'optparse'
 require 'colorls/version'
-require 'ostruct'
 
 module ColorLS
   class Flags
@@ -11,7 +10,7 @@ module ColorLS
       @light_colors = false
 
       @opts = default_opts
-      @show_report = false
+      @report_mode = false
       @exit_status_code = 0
 
       parse_options
@@ -31,16 +30,18 @@ module ColorLS
       process_args
     end
 
+    Option = Struct.new(:flags, :desc)
+
     def options
       list = @parser.top.list + @parser.base.list
 
       result = list.collect do |o|
-        next unless o.respond_to? 'desc'
+        next unless o.respond_to? :desc
 
         flags = o.short + o.long
         next if flags.empty?
 
-        OpenStruct.new(flags: flags, desc: o.desc)
+        Option.new(flags, o.desc)
       end
 
       result.compact
@@ -88,7 +89,7 @@ module ColorLS
         $stderr.puts "#{dir}: #{e}".colorize(:red)
       end
 
-      core.display_report if @show_report
+      core.display_report(@report_mode) if @report_mode
 
       @exit_status_code
     end
@@ -102,11 +103,12 @@ module ColorLS
         mode: STDOUT.tty? ? :vertical : :one_per_line, # rubocop:disable Style/GlobalStdStream
         all: false,
         almost_all: false,
-        git_status: false,
+        show_git: false,
         colors: [],
         tree_depth: 3,
-        show_group: true,
-        show_user: true
+        show_inode: false,
+        indicator_style: 'slash',
+        long_style_options: {}
       }
     end
 
@@ -139,8 +141,19 @@ module ColorLS
       options.on('-A', '--almost-all', 'do not list . and ..')            { @opts[:almost_all] = true }
       options.on('-d', '--dirs', 'show only directories')                 { @opts[:show] = :dirs }
       options.on('-f', '--files', 'show only files')                      { @opts[:show] = :files }
-      options.on('--gs', '--git-status', 'show git status for each file') { @opts[:git_status] = true }
-      options.on('--report', 'show brief report')                         { @show_report = true }
+      options.on('--gs', '--git-status', 'show git status for each file') { @opts[:show_git] = true }
+      options.on('-p', 'append / indicator to directories')               { @opts[:indicator_style] = 'slash' }
+      options.on('-i', '--inode', 'show inode number')                    { @opts[:show_inode] = true }
+      options.on('--report=[WORD]', %w[short long], 'show report: short, long (default if omitted)') do |word|
+        word ||= :long
+        @report_mode = word.to_sym
+      end
+      options.on(
+        '--indicator-style=[STYLE]',
+        %w[none slash], 'append indicator with style STYLE to entry names: none, slash (-p) (default)'
+      ) do |style|
+        @opts[:indicator_style] = style
+      end
     end
 
     def add_format_options(options)
@@ -164,17 +177,36 @@ module ColorLS
       options.on('-C', 'list entries by columns instead of by lines')     { @opts[:mode] = :vertical }
     end
 
+    def default_long_style_options
+      {
+        show_group: true,
+        show_user: true,
+        time_style: '',
+        hard_links_count: true
+      }
+    end
+
     def add_long_style_options(options)
-      options.on('-l', '--long', 'use a long listing format')             { @opts[:mode] = :long }
+      long_style_options = default_long_style_options
+      options.on('-l', '--long', 'use a long listing format') { @opts[:mode] = :long }
       options.on('-o', 'use a long listing format without group information') do
         @opts[:mode] = :long
-        @opts[:show_group] = false
+        long_style_options[:show_group] = false
       end
       options.on('-g', 'use a long listing format without owner information') do
         @opts[:mode] = :long
-        @opts[:show_user] = false
+        long_style_options[:show_user] = false
       end
-      options.on('-G', '--no-group', 'show no group information in a long listing') { @opts[:show_group] = false }
+      options.on('-G', '--no-group', 'show no group information in a long listing') do
+        long_style_options[:show_group] = false
+      end
+      options.on('--time-style=FORMAT', String, 'use time display format') do |time_style|
+        long_style_options[:time_style] = time_style
+      end
+      options.on('--no-hardlinks', 'show no hard links count in a long listing') do
+        long_style_options[:hard_links_count] = false
+      end
+      @opts[:long_style_options] = long_style_options
     end
 
     def add_general_options(options)
@@ -261,7 +293,7 @@ EXAMPLES
       end
 
       # show help and exit if the only argument is -h
-      show_help if !@args.empty? && @args.all? { |arg| arg == '-h' }
+      show_help if !@args.empty? && @args.all?('-h')
 
       @parser.parse!(@args)
 

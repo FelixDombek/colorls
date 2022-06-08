@@ -8,8 +8,17 @@ module ColorLS
     @file_encoding
   end
 
-  @screen_width = IO.console.winsize[1]
-  @screen_width = 80 if @screen_width.zero?
+  def self.terminal_width
+    console = IO.console
+
+    width = IO.console_size[1]
+
+    return width if console.nil? || console.winsize[1].zero?
+
+    console.winsize[1]
+  end
+
+  @screen_width = terminal_width
 
   def self.screen_width
     @screen_width
@@ -17,8 +26,9 @@ module ColorLS
 
   class Core
     def initialize(all: false, sort: false, show: false,
-      mode: nil, git_status: false, almost_all: false, colors: [], group: nil,
-      reverse: false, hyperlink: false, tree_depth: nil, show_group: true, show_user: true)
+      mode: nil, show_git: false, almost_all: false, colors: [], group: nil,
+      reverse: false, hyperlink: false, tree_depth: nil, show_inode: false,
+      indicator_style: 'slash', long_style_options: {})
       @count = {folders: 0, recognized_files: 0, unrecognized_files: 0}
       @all          = all
       @almost_all   = almost_all
@@ -28,10 +38,16 @@ module ColorLS
       @group        = group
       @show         = show
       @one_per_line = mode == :one_per_line
-      init_long_format(mode,show_group,show_user)
+      @show_inode   = show_inode
+      init_long_format(mode,long_style_options)
       @tree         = {mode: mode == :tree, depth: tree_depth}
       @horizontal   = mode == :horizontal
-      @git_status   = init_git_status(git_status)
+      @git_status   = init_git_status(show_git)
+      @time_style   = long_style_options.key?(:time_style) ? long_style_options[:time_style] : ''
+      @indicator_style = indicator_style
+      @hard_links_count = long_style_options.key?(:hard_links_count) ? long_style_options[:hard_links_count] : true
+      # how much characters an item occupies besides its name
+      @additional_chars_per_item = 12 + (@show_git ? 4 : 0) + (@show_inode ? 10 : 0)
 
       init_colors colors
 
@@ -65,13 +81,24 @@ module ColorLS
       ls
     end
 
-    def display_report
-      print "\n   Found #{@count.values.sum} items in total.".colorize(@colors[:report])
+    def display_report(report_mode)
+      if report_mode == :short
+        puts <<~REPORT
 
-      puts  "\n\n\tFolders\t\t\t: #{@count[:folders]}"\
-        "\n\tRecognized files\t: #{@count[:recognized_files]}"\
-        "\n\tUnrecognized files\t: #{@count[:unrecognized_files]}"
-        .colorize(@colors[:report])
+          \s\s\s\sFolders: #{@count[:folders]}, Files: #{@count[:recognized_files] + @count[:unrecognized_files]}.
+        REPORT
+          .colorize(@colors[:report])
+      else
+        puts <<~REPORT
+
+              Found #{@count.values.sum} items in total.
+
+          \tFolders\t\t\t: #{@count[:folders]}
+          \tRecognized files\t: #{@count[:recognized_files]}
+          \tUnrecognized files\t: #{@count[:unrecognized_files]}
+        REPORT
+          .colorize(@colors[:report])
+      end
     end
 
     private
@@ -106,13 +133,14 @@ module ColorLS
       end
     end
 
-    def init_long_format(mode, show_group, show_user)
+    def init_long_format(mode, long_style_options)
       @long = mode == :long
-      @show_group = show_group
-      @show_user = show_user
+      @show_group = long_style_options.key?(:show_group) ? long_style_options[:show_group] : true
+      @show_user = long_style_options.key?(:show_user) ? long_style_options[:show_user] : true
     end
 
     def init_git_status(show_git)
+      @show_git = show_git
       return {}.freeze unless show_git
 
       # stores git status information per directory
@@ -126,11 +154,8 @@ module ColorLS
       end
     end
 
-    # how much characters an item occupies besides its name
-    CHARS_PER_ITEM = 12
-
     def item_widths
-      @contents.map { |item| Unicode::DisplayWidth.of(item.show) + CHARS_PER_ITEM }
+      @contents.map { |item| Unicode::DisplayWidth.of(item.show) + @additional_chars_per_item }
     end
 
     def filter_hidden_contents
@@ -228,14 +253,14 @@ module ColorLS
     def size_info(filesize)
       size = Filesize.new(filesize).pretty.split
       size = "#{size[0][0..-4].rjust(4,' ')} #{size[1].ljust(3,' ')}"
-      return size.colorize(@colors[:file_large])  if filesize >= 512 * 1024 ** 2
-      return size.colorize(@colors[:file_medium]) if filesize >= 128 * 1024 ** 2
+      return size.colorize(@colors[:file_large])  if filesize >= 512 * (1024 ** 2)
+      return size.colorize(@colors[:file_medium]) if filesize >= 128 * (1024 ** 2)
 
       size.colorize(@colors[:file_small])
     end
 
     def mtime_info(file_mtime)
-      mtime = file_mtime.asctime
+      mtime = @time_style.start_with?('+') ? file_mtime.strftime(@time_style.delete_prefix('+')) : file_mtime.asctime
       now = Time.now
       return mtime.colorize(@colors[:hour_old]) if now - file_mtime < 60 * 60
       return mtime.colorize(@colors[:day_old])  if now - file_mtime < 24 * 60 * 60
@@ -275,12 +300,19 @@ module ColorLS
       end
     end
 
+    def inode(content)
+      return '' unless @show_inode
+
+      content.stats.ino.to_s.rjust(10).colorize(@colors[:inode])
+    end
+
     def long_info(content)
       return '' unless @long
 
       links = content.nlink.to_s.rjust(@linklength)
 
-      line_array = [mode_info(content.stats), links]
+      line_array = [mode_info(content.stats)]
+      line_array.push links if @hard_links_count
       line_array.push user_info(content) if @show_user
       line_array.push group_info(content.group) if @show_group
       line_array.concat [size_info(content.size), mtime_info(content.mtime)]
@@ -306,14 +338,13 @@ module ColorLS
     def fetch_string(content, key, color, increment)
       @count[increment] += 1
       value = increment == :folders ? @folders[key] : @files[key]
-      logo  = value.gsub(/\\u[\da-f]{4}/i) { |m| [m[-4..-1].to_i(16)].pack('U') }
-      name = content.show
-      name = make_link(content) if @hyperlink
-      name += content.directory? ? '/' : ' '
+      logo  = value.gsub(/\\u[\da-f]{4}/i) { |m| [m[-4..].to_i(16)].pack('U') }
+      name = @hyperlink ? make_link(content) : content.show
+      name += content.directory? && @indicator_style != 'none' ? '/' : ' '
       entry = "#{out_encode(logo)}  #{out_encode(name)}"
       entry = entry.bright if !content.directory? && content.executable?
 
-      "#{long_info(content)} #{git_info(content)} #{entry.colorize(color)}#{symlink_info(content)}"
+      "#{inode(content)} #{long_info(content)} #{git_info(content)} #{entry.colorize(color)}#{symlink_info(content)}"
     end
 
     def ls_line(chunk, widths)
@@ -321,9 +352,9 @@ module ColorLS
       line = +''
       chunk.each_with_index do |content, i|
         entry = fetch_string(content, *options(content))
-        line << ' ' * padding
+        line << (' ' * padding)
         line << '  ' << entry.encode(Encoding.default_external, undef: :replace)
-        padding = widths[i] - Unicode::DisplayWidth.of(content.show) - CHARS_PER_ITEM
+        padding = widths[i] - Unicode::DisplayWidth.of(content.show) - @additional_chars_per_item
       end
       print line << "\n"
     end
@@ -391,12 +422,12 @@ module ColorLS
     def tree_branch_preprint(prespace, indent, prespace_icon)
       return prespace_icon if prespace.zero?
 
-      ' │ ' * (prespace/indent) + prespace_icon + '─' * indent
+      (' │ ' * (prespace/indent)) + prespace_icon + ('─' * indent)
     end
 
     def make_link(content)
       uri = Addressable::URI.convert_path(File.absolute_path(content.path))
-      "\033]8;;#{uri}\007#{content.name}\033]8;;\007"
+      "\033]8;;#{uri}\007#{content.show}\033]8;;\007"
     end
   end
 end

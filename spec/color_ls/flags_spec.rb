@@ -20,9 +20,12 @@ RSpec.describe ColorLS::Flags do
       end.not_to output(/((r|-).*(w|-).*(x|-).*){3}/).to_stdout
     }
 
-    it('does not display hidden files')        { expect { subject }.not_to output(/\.hidden-file/).to_stdout }
-    it('does not show a report')               { expect { subject }.not_to output(/Found \d+ contents/).to_stdout }
-    it('displays dirs & files alphabetically') { expect { subject }.to output(/a-file.+symlinks.+z-file/m).to_stdout }
+    it('does not display hidden files')         { expect { subject }.not_to output(/\.hidden-file/).to_stdout }
+    it('displays dirs & files alphabetically')  { expect { subject }.to output(/a-file.+symlinks.+z-file/m).to_stdout }
+
+    it 'does not show a report' do
+      expect { subject }.not_to output(/(Found \d+ items in total\.)|(Folders: \d+, Files: \d+\.)/).to_stdout
+    end
 
     it 'displays multiple files per line' do
       allow($stdout).to receive(:tty?).and_return(true)
@@ -72,7 +75,7 @@ RSpec.describe ColorLS::Flags do
 
     it 'shows special permission bits' do
       file_info = instance_double(
-        'FileInfo',
+        ColorLS::FileInfo,
         group: 'sys',
         mtime: Time.now,
         directory?: false,
@@ -85,12 +88,11 @@ RSpec.describe ColorLS::Flags do
         chardev?: false,
         socket?: false,
         symlink?: false,
-        stats: OpenStruct.new(
-          mode: 0o444, # read for user, owner, other
-          setuid?: true,
-          setgid?: true,
-          sticky?: true
-        ),
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
         executable?: false
       )
 
@@ -106,7 +108,7 @@ RSpec.describe ColorLS::Flags do
 
     it 'shows number of hardlinks' do
       file_info = instance_double(
-        'FileInfo',
+        ColorLS::FileInfo,
         group: 'sys',
         mtime: Time.now,
         directory?: false,
@@ -119,12 +121,11 @@ RSpec.describe ColorLS::Flags do
         chardev?: false,
         socket?: false,
         symlink?: false,
-        stats: OpenStruct.new(
-          mode: 0o444, # read for user, owner, other
-          setuid?: true,
-          setgid?: true,
-          sticky?: true
-        ),
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
         executable?: false
       )
 
@@ -319,10 +320,13 @@ RSpec.describe ColorLS::Flags do
   end
 
   context 'symlinked directory with trailing separator' do
-    let(:args) { ['-x', File.join(FIXTURES, 'symlinks', 'Supportlink', File::SEPARATOR)] }
+    link_to_dir = File.join(FIXTURES, 'symlinks', 'Supportlink', File::SEPARATOR)
+    let(:args) { ['-x', link_to_dir] }
 
     it 'shows the file in the linked directory' do
-      if File.symlink? File.join(FIXTURES, 'symlinks', 'Supportlink')
+      stat = File.lstat link_to_dir
+
+      if stat.directory?
         expect { subject }.to output(/yaml_sort_checker.rb/).to_stdout
       else
         skip 'symlinks not supported'
@@ -352,11 +356,27 @@ RSpec.describe ColorLS::Flags do
     end
   end
 
-  context 'with unrecognized files' do
-    let(:args) { ['--report', FIXTURES] }
+  context 'with --report flag' do
+    let(:args) { ['--report', '--report=long', FIXTURES] }
 
-    it 'shows a report with unrecognized files' do
-      expect { subject }.to output(/Unrecognized files\s+: 3/).to_stdout
+    it 'shows a report with recognized and unrecognized files' do
+      expect { subject }.to output(/Recognized files\s+: 3\n.+Unrecognized files\s+: 3/).to_stdout
+    end
+  end
+
+  context 'with --report=short flag' do
+    let(:args) { ['--report=short', FIXTURES] }
+
+    it 'shows a brief report' do
+      expect { subject }.to output(/Folders: \d+, Files: \d+\./).to_stdout
+    end
+  end
+
+  context 'with --inode flag' do
+    let(:args) { ['--inode', FIXTURES] }
+
+    it 'shows inode number before logo' do
+      expect { subject }.to output(/\d+ +[^ ]+ +a.md/).to_stdout
     end
   end
 
@@ -374,7 +394,7 @@ RSpec.describe ColorLS::Flags do
 
     before do
       file_info = instance_double(
-        'FileInfo',
+        ColorLS::FileInfo,
         group: 'sys',
         mtime: Time.now,
         directory?: false,
@@ -387,12 +407,11 @@ RSpec.describe ColorLS::Flags do
         chardev?: false,
         socket?: false,
         symlink?: false,
-        stats: OpenStruct.new(
-          mode: 0o444, # read for user, owner, other
-          setuid?: true,
-          setgid?: true,
-          sticky?: true
-        ),
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
         executable?: false
       )
 
@@ -418,7 +437,7 @@ RSpec.describe ColorLS::Flags do
 
     before do
       file_info = instance_double(
-        'FileInfo',
+        ColorLS::FileInfo,
         group: 'sys',
         mtime: Time.now,
         directory?: false,
@@ -431,12 +450,11 @@ RSpec.describe ColorLS::Flags do
         chardev?: false,
         socket?: false,
         symlink?: false,
-        stats: OpenStruct.new(
-          mode: 0o444, # read for user, owner, other
-          setuid?: true,
-          setgid?: true,
-          sticky?: true
-        ),
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
         executable?: false
       )
 
@@ -462,7 +480,7 @@ RSpec.describe ColorLS::Flags do
 
     before do
       file_info = instance_double(
-        'FileInfo',
+        ColorLS::FileInfo,
         group: 'sys',
         mtime: Time.now,
         directory?: false,
@@ -475,12 +493,11 @@ RSpec.describe ColorLS::Flags do
         chardev?: false,
         socket?: false,
         symlink?: false,
-        stats: OpenStruct.new(
-          mode: 0o444, # read for user, owner, other
-          setuid?: true,
-          setgid?: true,
-          sticky?: true
-        ),
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
         executable?: false
       )
 
@@ -506,7 +523,7 @@ RSpec.describe ColorLS::Flags do
 
     before do
       file_info = instance_double(
-        'FileInfo',
+        ColorLS::FileInfo,
         group: 'sys',
         mtime: Time.now,
         directory?: false,
@@ -519,12 +536,11 @@ RSpec.describe ColorLS::Flags do
         chardev?: false,
         socket?: false,
         symlink?: false,
-        stats: OpenStruct.new(
-          mode: 0o444, # read for user, owner, other
-          setuid?: true,
-          setgid?: true,
-          sticky?: true
-        ),
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
         executable?: false
       )
 
@@ -542,6 +558,59 @@ RSpec.describe ColorLS::Flags do
 
     it 'lists with user info' do
       expect { subject }.to output(/user/).to_stdout
+    end
+  end
+
+  context 'with --indicator-style=none' do
+    let(:args) { ['-dl', '--indicator-style=none', FIXTURES] }
+
+    it { expect { subject }.to output(/.+second-level \n.+symlinks \n/).to_stdout }
+  end
+
+  context 'with --time-style option' do
+    let(:args) { ['-l', '--time-style=+%y-%m-%d %k:%M', "#{FIXTURES}/a.txt"] }
+
+    mtime = File.mtime("#{FIXTURES}/a.txt")
+
+    it { expect { subject }.to output(/#{mtime.strftime("%y-%m-%d %k:%M")}/).to_stdout }
+  end
+
+  context 'with --no-hardlinks flag in a listing format' do
+    let(:args) { ['-l', '--no-hardlink', "#{FIXTURES}/a.txt"] }
+
+    before do
+      file_info = instance_double(
+        ColorLS::FileInfo,
+        group: 'sys',
+        mtime: Time.now,
+        directory?: false,
+        owner: 'user',
+        name: 'a.txt',
+        show: 'a.txt',
+        nlink: 987,
+        size: 128,
+        blockdev?: false,
+        chardev?: false,
+        socket?: false,
+        symlink?: false,
+        stats: instance_double(File::Stat,
+                               mode: 0o444, # read for user, owner, other
+                               setuid?: true,
+                               setgid?: true,
+                               sticky?: true),
+        executable?: false
+      )
+
+      allow(ColorLS::FileInfo).to receive(:new).with(
+        path: File.join(FIXTURES, 'a.txt'),
+        parent: FIXTURES,
+        name: 'a.txt',
+        link_info: true
+      ) { file_info }
+    end
+
+    it 'lists without hard links count' do
+      expect { subject }.not_to output(/987/).to_stdout
     end
   end
 end
