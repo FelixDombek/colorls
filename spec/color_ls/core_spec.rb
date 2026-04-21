@@ -25,6 +25,7 @@ RSpec.describe ColorLS::Core do
         chardev?: false,
         socket?: false,
         symlink?: false,
+        hidden?: false,
         stats: instance_double(File::Stat,
                                mode: 0o444, # read for user, owner, other
                                setuid?: false,
@@ -47,6 +48,7 @@ RSpec.describe ColorLS::Core do
         chardev?: false,
         socket?: false,
         symlink?: false,
+        hidden?: false,
         stats: instance_double(File::Stat,
                                mode: 0o444, # read for user, owner, other
                                setuid?: false,
@@ -55,7 +57,7 @@ RSpec.describe ColorLS::Core do
         executable?: false
       )
 
-      allow(::Dir).to receive(:entries).and_return([camera])
+      allow(Dir).to receive(:entries).and_return([camera])
 
       allow(ColorLS::FileInfo).to receive(:new).and_return(file_info)
 
@@ -77,6 +79,7 @@ RSpec.describe ColorLS::Core do
         chardev?: false,
         socket?: false,
         symlink?: false,
+        hidden?: true,
         executable?: false
       )
 

@@ -22,9 +22,9 @@ A Ruby script that colorizes the `ls` output with color and icons. Here are the 
     - `-A`   (or) `--almost-all`
     - `-d`   (or) `--dirs`
     - `-f`   (or) `--files`
-    - `-h`   (or) `--help`
+    - `--help`
     - `-l`   (or) `--long`
-    - `-r`   (or) `--report`
+    - `--report`
     - `--tree` (or) `--tree=[DEPTH]`
     - `--gs` (or) `--git-status`
     - `--sd` (or) `--sort-dirs` or `--group-directories-first`
@@ -67,7 +67,7 @@ Man pages have been added. Checkout `man colorls`.
 
   ![image](https://user-images.githubusercontent.com/17109060/32149065-5a27c9d4-bd25-11e7-9a2b-fd731d76a058.png)
 
-- With `-h` (or) `--help` : Prints a very helpful help menu
+- With `--help` : Prints a very helpful help menu
 
   ![image](https://user-images.githubusercontent.com/17109060/32149096-cf2cf5b0-bd25-11e7-84b6-909d79099c98.png)
 
@@ -75,7 +75,7 @@ Man pages have been added. Checkout `man colorls`.
 
   ![image](https://user-images.githubusercontent.com/17109060/32149049-2a63ae48-bd25-11e7-943c-5ceed25bd693.png)
 
-- With `-r` (or) `--report` : Shows brief report about number of files and folders shown
+- With `--report` : Shows brief report about number of files and folders shown
 
   ![image](https://user-images.githubusercontent.com/17109060/32149082-96a83fec-bd25-11e7-9081-7f77e4c90e90.png)
 
@@ -113,12 +113,19 @@ Man pages have been added. Checkout `man colorls`.
 
   ![image](https://user-images.githubusercontent.com/17109060/32149084-9eb2a416-bd25-11e7-8fb7-a9d336c6e038.png)
 
+- Using `--non-human-readable` with `-l` :
+  - This will print the file sizes in bytes (non-human readable format)
+
+  ![image](https://user-images.githubusercontent.com/19269206/234581461-1e1fdd90-a362-4cea-ab82-5ca360746be8.png)
+
 # Installation
 
 [(Back to top)](#table-of-contents)
 
-1. Install Ruby (preferably, version >= 2.6)
-2. [Download](https://www.nerdfonts.com/font-downloads) and install a Nerd Font. Have a look at the [Nerd Font README](https://github.com/ryanoasis/nerd-fonts/blob/master/readme.md) for installation instructions.
+1. Install Ruby (preferably, version >= 2.6 via a version manager like [rbenv](https://github.com/rbenv/rbenv))
+2. [Download](https://www.nerdfonts.com/font-downloads) and install a Nerd Font so you can see the library icons. Have a look at the [Nerd Font README](https://github.com/ryanoasis/nerd-fonts/blob/master/readme.md) for installation instructions. We're using "Hack Nerd Font" for this guide.
+
+    *Note for MacOS users using the stock terminal - Please enable Nerd Font at Terminal > Preferences > Profiles > Text > Font. Click `Change..` and select `Hack Nerd Font` - Regular*
 
     *Note for `iTerm2` users - Please enable the Nerd Font at iTerm2 > Preferences > Profiles > Text > Non-ASCII font > Hack Regular Nerd Font Complete.*
 
@@ -138,9 +145,13 @@ Man pages have been added. Checkout `man colorls`.
     source $(dirname $(gem which colorls))/tab_complete.sh
     ```
 
+    *Don't forget to restart your terminal*
+
 5. Start using `colorls` :tada:
 
 6. Have a look at [Recommended configurations](#recommended-configurations) and [Custom configurations](#custom-configurations).
+
+If you're having trouble following the installation guide above, here's a [video](https://replayable.io/replay/63703dff5b09d400696d2663/?share=R2Twi0SdQiqg8cxHyzem6g) reproducing steps 2 to 6.
 
 # Recommended configurations
 
@@ -168,6 +179,14 @@ You can overwrite the existing icons and colors mapping by copying the yaml file
   Please have a look at the [list of supported color names](https://github.com/sickill/rainbow#color-list). You may also use a color hex code as long as it is quoted within the YAML file and prefaced with a `#` symbol.
 
   Let's say that you're using the dark color scheme and would like to change the color of untracked file (`??`) in the `--git-status` flag to yellow. Copy the defaut `dark_colors.yaml` and change it.
+
+  Check if the `~/.config/colorls` directory exists. If it doesn't exist, create it using the following command:
+ 
+  ```sh
+  mkdir -p ~/.config/colorls
+  ```
+
+  And then
 
   ```sh
   cp $(dirname $(gem which colorls))/yaml/dark_colors.yaml ~/.config/colorls/dark_colors.yaml

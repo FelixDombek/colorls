@@ -24,11 +24,13 @@ module ColorLS
     @screen_width
   end
 
-  class Core
+  class Core # rubocop:disable Metrics/ClassLength
+    MIN_SIZE_CHARS = 4
+
     def initialize(all: false, sort: false, show: false,
       mode: nil, show_git: false, almost_all: false, colors: [], group: nil,
       reverse: false, hyperlink: false, tree_depth: nil, show_inode: false,
-      indicator_style: 'slash', long_style_options: {})
+      indicator_style: 'slash', long_style_options: {}, icons: true)
       @count = {folders: 0, recognized_files: 0, unrecognized_files: 0}
       @all          = all
       @almost_all   = almost_all
@@ -46,12 +48,14 @@ module ColorLS
       @time_style   = long_style_options.key?(:time_style) ? long_style_options[:time_style] : ''
       @indicator_style = indicator_style
       @hard_links_count = long_style_options.key?(:hard_links_count) ? long_style_options[:hard_links_count] : true
-      # how much characters an item occupies besides its name
-      @additional_chars_per_item = 12 + (@show_git ? 4 : 0) + (@show_inode ? 10 : 0)
+      @icons = icons
 
       init_colors colors
-
       init_icons
+    end
+
+    def additional_chars_per_item
+      12 + (@show_git ? 4 : 0) + (@show_inode ? 10 : 0)
     end
 
     def ls_dir(info)
@@ -118,6 +122,7 @@ module ColorLS
       layout.each_line do |line, widths|
         ls_line(line, widths)
       end
+      clear_chars_for_size
     end
 
     def init_colors(colors)
@@ -137,6 +142,9 @@ module ColorLS
       @long = mode == :long
       @show_group = long_style_options.key?(:show_group) ? long_style_options[:show_group] : true
       @show_user = long_style_options.key?(:show_user) ? long_style_options[:show_user] : true
+      @show_symbol_dest = long_style_options.key?(:show_symbol_dest) ? long_style_options[:show_symbol_dest] : false
+      @show_human_readable_size =
+        long_style_options.key?(:human_readable_size) ? long_style_options[:human_readable_size] : true
     end
 
     def init_git_status(show_git)
@@ -155,7 +163,7 @@ module ColorLS
     end
 
     def item_widths
-      @contents.map { |item| Unicode::DisplayWidth.of(item.show) + @additional_chars_per_item }
+      @contents.map { |item| Unicode::DisplayWidth.of(item.show) + additional_chars_per_item }
     end
 
     def filter_hidden_contents
@@ -251,12 +259,34 @@ module ColorLS
     end
 
     def size_info(filesize)
-      size = Filesize.new(filesize).pretty.split
-      size = "#{size[0][0..-4].rjust(4,' ')} #{size[1].ljust(3,' ')}"
+      filesize = Filesize.new(filesize)
+      size = @show_human_readable_size ? filesize.pretty(precision: 0) : filesize.to_s('B', precision: 0)
+      size = size.split
+      size = justify_size_info(size)
       return size.colorize(@colors[:file_large])  if filesize >= 512 * (1024 ** 2)
       return size.colorize(@colors[:file_medium]) if filesize >= 128 * (1024 ** 2)
 
       size.colorize(@colors[:file_small])
+    end
+
+    def chars_for_size
+      @chars_for_size ||= if @show_human_readable_size
+                            MIN_SIZE_CHARS
+                          else
+                            max_size = @contents.max_by(&:size).size
+                            reqd_chars = max_size.to_s.length
+                            [reqd_chars, MIN_SIZE_CHARS].max
+                          end
+    end
+
+    def justify_size_info(size)
+      size_num = size[0].rjust(chars_for_size, ' ')
+      size_unit = @show_human_readable_size ? size[1].ljust(3, ' ') : size[1]
+      "#{size_num} #{size_unit}"
+    end
+
+    def clear_chars_for_size
+      @chars_for_size = nil
     end
 
     def mtime_info(file_mtime)
@@ -315,7 +345,7 @@ module ColorLS
       line_array.push links if @hard_links_count
       line_array.push user_info(content) if @show_user
       line_array.push group_info(content.group) if @show_group
-      line_array.concat [size_info(content.size), mtime_info(content.mtime)]
+      line_array.push(size_info(content.size), mtime_info(content.mtime))
       line_array.join('   ')
     end
 
@@ -331,6 +361,15 @@ module ColorLS
       end
     end
 
+    def update_content_if_show_symbol_dest(content, show_symbol_dest_flag)
+      return content unless show_symbol_dest_flag
+      return content unless content.symlink?
+      return content if content.link_target.nil?
+      return content if content.dead?
+
+      FileInfo.info(content.link_target)
+    end
+
     def out_encode(str)
       str.encode(Encoding.default_external, undef: :replace, replace: '')
     end
@@ -341,10 +380,13 @@ module ColorLS
       logo  = value.gsub(/\\u[\da-f]{4}/i) { |m| [m[-4..].to_i(16)].pack('U') }
       name = @hyperlink ? make_link(content) : content.show
       name += content.directory? && @indicator_style != 'none' ? '/' : ' '
-      entry = "#{out_encode(logo)}  #{out_encode(name)}"
+      entry = @icons ? "#{out_encode(logo)}  #{out_encode(name)}" : out_encode(name).to_s
       entry = entry.bright if !content.directory? && content.executable?
 
-      "#{inode(content)} #{long_info(content)} #{git_info(content)} #{entry.colorize(color)}#{symlink_info(content)}"
+      symlink_info_string = symlink_info(content)
+      content = update_content_if_show_symbol_dest(content,@show_symbol_dest)
+
+      "#{inode(content)} #{long_info(content)} #{git_info(content)} #{entry.colorize(color)}#{symlink_info_string}"
     end
 
     def ls_line(chunk, widths)
@@ -354,7 +396,7 @@ module ColorLS
         entry = fetch_string(content, *options(content))
         line << (' ' * padding)
         line << '  ' << entry.encode(Encoding.default_external, undef: :replace)
-        padding = widths[i] - Unicode::DisplayWidth.of(content.show) - @additional_chars_per_item
+        padding = widths[i] - Unicode::DisplayWidth.of(content.show) - additional_chars_per_item
       end
       print line << "\n"
     end
@@ -365,6 +407,7 @@ module ColorLS
                   when file.blockdev?   then :blockdev
                   when file.socket?     then :socket
                   when file.executable? then :executable_file
+                  when file.hidden?     then :hidden
                   when @files.key?(key) then :recognized_file
                   else                       :unrecognized_file
                   end
@@ -373,20 +416,32 @@ module ColorLS
 
     def options(content)
       if content.directory?
-        key = content.name.downcase.to_sym
-        key = @folder_aliases[key] unless @folders.key? key
-        key = :folder if key.nil?
-        color = @colors[:dir]
-        group = :folders
+        options_directory(content).values_at(:key, :color, :group)
       else
-        key = File.extname(content.name).delete_prefix('.').downcase.to_sym
-        key = @file_aliases[key] unless @files.key? key
-        color = file_color(content, key)
-        group = @files.key?(key) ? :recognized_files : :unrecognized_files
-        key = :file if key.nil?
+        options_file(content).values_at(:key, :color, :group)
       end
+    end
 
-      [key, color, group]
+    def options_directory(content)
+      key = content.name.downcase.to_sym
+      key = @folder_aliases[key] unless @folders.key?(key)
+      key = :folder if key.nil?
+
+      color = content.hidden? ? @colors[:hidden_dir] : @colors[:dir]
+
+      {key: key, color: color, group: :folders}
+    end
+
+    def options_file(content)
+      key = File.extname(content.name).delete_prefix('.').downcase.to_sym
+      key = @file_aliases[key] unless @files.key?(key)
+
+      color = file_color(content, key)
+      group = @files.key?(key) ? :recognized_files : :unrecognized_files
+
+      key = :file if key.nil?
+
+      {key: key, color: color, group: group}
     end
 
     def tree_contents(path)

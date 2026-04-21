@@ -58,7 +58,7 @@ module ColorLS
 
     def group_files_and_directories
       infos = @args.flat_map do |arg|
-        FileInfo.info(arg)
+        FileInfo.info(arg, show_filepath: true)
       rescue Errno::ENOENT
         $stderr.puts "colorls: Specified path '#{arg}' doesn't exist.".colorize(:red)
         @exit_status_code = 2
@@ -175,6 +175,7 @@ module ColorLS
       end
       options.on('-x', 'list entries by lines instead of by columns')     { @opts[:mode] = :horizontal }
       options.on('-C', 'list entries by columns instead of by lines')     { @opts[:mode] = :vertical }
+      options.on('--without-icons', 'list entries without icons')         { @opts[:icons] = false }
     end
 
     def default_long_style_options
@@ -182,13 +183,30 @@ module ColorLS
         show_group: true,
         show_user: true,
         time_style: '',
-        hard_links_count: true
+        hard_links_count: true,
+        show_symbol_dest: false,
+        human_readable_size: true
       }
     end
 
     def add_long_style_options(options)
       long_style_options = default_long_style_options
       options.on('-l', '--long', 'use a long listing format') { @opts[:mode] = :long }
+      long_style_options = set_long_style_user_and_group_options(options, long_style_options)
+      options.on('--time-style=FORMAT', String, 'use time display format') do |time_style|
+        long_style_options[:time_style] = time_style
+      end
+      options.on('--no-hardlinks', 'show no hard links count in a long listing') do
+        long_style_options[:hard_links_count] = false
+      end
+      long_style_options = get_long_style_symlink_options(options, long_style_options)
+      options.on('--non-human-readable', 'show file sizes in bytes only') do
+        long_style_options[:human_readable_size] = false
+      end
+      @opts[:long_style_options] = long_style_options
+    end
+
+    def set_long_style_user_and_group_options(options, long_style_options)
       options.on('-o', 'use a long listing format without group information') do
         @opts[:mode] = :long
         long_style_options[:show_group] = false
@@ -200,13 +218,14 @@ module ColorLS
       options.on('-G', '--no-group', 'show no group information in a long listing') do
         long_style_options[:show_group] = false
       end
-      options.on('--time-style=FORMAT', String, 'use time display format') do |time_style|
-        long_style_options[:time_style] = time_style
+      long_style_options
+    end
+
+    def get_long_style_symlink_options(options, long_style_options)
+      options.on('-L', 'show information on the destination of symbolic links') do
+        long_style_options[:show_symbol_dest] = true
       end
-      options.on('--no-hardlinks', 'show no hard links count in a long listing') do
-        long_style_options[:hard_links_count] = false
-      end
-      @opts[:long_style_options] = long_style_options
+      long_style_options
     end
 
     def add_general_options(options)

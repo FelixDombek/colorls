@@ -11,6 +11,41 @@ RSpec.describe ColorLS::Flags do
     raise "colorls exited with #{e.status}" unless e.success?
   end
 
+  let(:a_txt_file_info) do
+    instance_double(
+      ColorLS::FileInfo,
+      group: 'sys',
+      mtime: Time.now,
+      directory?: false,
+      owner: 'user',
+      name: 'a.txt',
+      show: 'a.txt',
+      nlink: 1,
+      size: 128,
+      blockdev?: false,
+      chardev?: false,
+      socket?: false,
+      symlink?: false,
+      hidden?: false,
+      stats: instance_double(File::Stat,
+                             mode: 0o444, # read for user, owner, other
+                             setuid?: true,
+                             setgid?: true,
+                             sticky?: true),
+      executable?: false
+    )
+  end
+
+  before(:each, :use_file_info_stub) do
+    allow(ColorLS::FileInfo).to receive(:new).with(
+      path: File.join(FIXTURES, 'a.txt'),
+      parent: FIXTURES,
+      name: 'a.txt',
+      link_info: true,
+      show_filepath: true
+    ) { a_txt_file_info }
+  end
+
   context 'with no flags' do
     let(:args) { [FIXTURES] }
 
@@ -30,7 +65,7 @@ RSpec.describe ColorLS::Flags do
     it 'displays multiple files per line' do
       allow($stdout).to receive(:tty?).and_return(true)
 
-      expect { subject }.not_to output(/(.*\n){3}/).to_stdout
+      expect { subject }.not_to output(/(.*\n){7}/).to_stdout
     end
 
     it('does not display ./ or ../')           { expect { subject }.not_to output(%r(\.{1,2}/)).to_stdout }
@@ -68,75 +103,35 @@ RSpec.describe ColorLS::Flags do
     let(:args) { ['--long', FIXTURES] }
 
     it('lists file info') { expect { subject }.to output(/((r|-).*(w|-).*(x|-).*){3}/).to_stdout }
+
+    it 'rounds up file size to nearest MiB' do
+      expect { subject }.to output(/2 MiB[^\n]* 20kb-less-than-2mb\.txt/).to_stdout
+    end
+
+    it 'rounds down file size to nearest MiB' do
+      expect { subject }.to output(/1 MiB[^\n]* 20kb-more-than-1mb\.txt/).to_stdout
+    end
   end
 
   context 'with --long flag for `a.txt`' do
     let(:args) { ['--long', "#{FIXTURES}/a.txt"] }
 
-    it 'shows special permission bits' do
-      file_info = instance_double(
-        ColorLS::FileInfo,
-        group: 'sys',
-        mtime: Time.now,
-        directory?: false,
-        owner: 'user',
-        name: 'a.txt',
-        show: 'a.txt',
-        nlink: 1,
-        size: 128,
-        blockdev?: false,
-        chardev?: false,
-        socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
-        executable?: false
-      )
-
-      allow(ColorLS::FileInfo).to receive(:new).with(
-        path: File.join(FIXTURES, 'a.txt'),
-        parent: FIXTURES,
-        name: 'a.txt',
-        link_info: true
-      ) { file_info }
-
+    it 'shows special permission bits', :use_file_info_stub do
       expect { subject }.to output(/r-Sr-Sr-T  .*  a.txt/mx).to_stdout
     end
 
-    it 'shows number of hardlinks' do
-      file_info = instance_double(
-        ColorLS::FileInfo,
-        group: 'sys',
-        mtime: Time.now,
-        directory?: false,
-        owner: 'user',
-        name: 'a.txt',
-        show: 'a.txt',
-        nlink: 5, # number of hardlinks
-        size: 128,
-        blockdev?: false,
-        chardev?: false,
-        socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
-        executable?: false
-      )
-
-      allow(ColorLS::FileInfo).to receive(:new).with(
-        path: File.join(FIXTURES, 'a.txt'),
-        parent: FIXTURES,
-        name: 'a.txt',
-        link_info: true
-      ) { file_info }
+    it 'shows number of hardlinks', :use_file_info_stub do
+      allow(a_txt_file_info).to receive(:nlink).and_return 5
 
       expect { subject }.to output(/\S+\s+ 5 .*  a.txt/mx).to_stdout
+    end
+  end
+
+  context 'with --long and --non-human-readable flag for `2MB file`' do
+    let(:args) { ['--long', '--non-human-readable', "#{FIXTURES}/two_megabyte_file.txt"] }
+
+    it 'shows the file size in bytes' do
+      expect { subject }.to output(/#{2 * 1024 * 1024}\sB/).to_stdout
     end
   end
 
@@ -149,8 +144,8 @@ RSpec.describe ColorLS::Flags do
     end
 
     it 'returns no user / group info' do
-      allow(::Etc).to receive(:getpwuid).and_return(nil)
-      allow(::Etc).to receive(:getgrgid).and_return(nil)
+      allow(Etc).to receive(:getpwuid).and_return(nil)
+      allow(Etc).to receive(:getgrgid).and_return(nil)
 
       expect { subject }.to output(/\s+  \d+  \s+  \d+  .*  a.txt/mx).to_stdout
     end
@@ -338,7 +333,7 @@ RSpec.describe ColorLS::Flags do
     let(:args) { ['--snafu'] }
 
     it 'issues a warning, hint about `--help` and exit' do # rubocop:todo RSpec/MultipleExpectations
-      allow(::Kernel).to receive(:warn) do |message|
+      allow(Kernel).to receive(:warn) do |message|
         expect(message).to output '--snafu'
       end
 
@@ -360,7 +355,7 @@ RSpec.describe ColorLS::Flags do
     let(:args) { ['--report', '--report=long', FIXTURES] }
 
     it 'shows a report with recognized and unrecognized files' do
-      expect { subject }.to output(/Recognized files\s+: 3\n.+Unrecognized files\s+: 3/).to_stdout
+      expect { subject }.to output(/Recognized files\s+: 6\n.+Unrecognized files\s+: 3/).to_stdout
     end
   end
 
@@ -389,39 +384,8 @@ RSpec.describe ColorLS::Flags do
     end
   end
 
-  context 'with -o flag' do
+  context 'with -o flag', :use_file_info_stub do
     let(:args) { ['-o', "#{FIXTURES}/a.txt"] }
-
-    before do
-      file_info = instance_double(
-        ColorLS::FileInfo,
-        group: 'sys',
-        mtime: Time.now,
-        directory?: false,
-        owner: 'user',
-        name: 'a.txt',
-        show: 'a.txt',
-        nlink: 1,
-        size: 128,
-        blockdev?: false,
-        chardev?: false,
-        socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
-        executable?: false
-      )
-
-      allow(ColorLS::FileInfo).to receive(:new).with(
-        path: File.join(FIXTURES, 'a.txt'),
-        parent: FIXTURES,
-        name: 'a.txt',
-        link_info: true
-      ) { file_info }
-    end
 
     it 'lists without group info' do
       expect { subject }.not_to output(/sys/).to_stdout
@@ -432,39 +396,8 @@ RSpec.describe ColorLS::Flags do
     end
   end
 
-  context 'with -g flag' do
+  context 'with -g flag', :use_file_info_stub do
     let(:args) { ['-g', "#{FIXTURES}/a.txt"] }
-
-    before do
-      file_info = instance_double(
-        ColorLS::FileInfo,
-        group: 'sys',
-        mtime: Time.now,
-        directory?: false,
-        owner: 'user',
-        name: 'a.txt',
-        show: 'a.txt',
-        nlink: 1,
-        size: 128,
-        blockdev?: false,
-        chardev?: false,
-        socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
-        executable?: false
-      )
-
-      allow(ColorLS::FileInfo).to receive(:new).with(
-        path: File.join(FIXTURES, 'a.txt'),
-        parent: FIXTURES,
-        name: 'a.txt',
-        link_info: true
-      ) { file_info }
-    end
 
     it 'lists with group info' do
       expect { subject }.to output(/sys/).to_stdout
@@ -475,39 +408,8 @@ RSpec.describe ColorLS::Flags do
     end
   end
 
-  context 'with -o and -g flag' do
+  context 'with -o and -g flag', :use_file_info_stub do
     let(:args) { ['-og', "#{FIXTURES}/a.txt"] }
-
-    before do
-      file_info = instance_double(
-        ColorLS::FileInfo,
-        group: 'sys',
-        mtime: Time.now,
-        directory?: false,
-        owner: 'user',
-        name: 'a.txt',
-        show: 'a.txt',
-        nlink: 1,
-        size: 128,
-        blockdev?: false,
-        chardev?: false,
-        socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
-        executable?: false
-      )
-
-      allow(ColorLS::FileInfo).to receive(:new).with(
-        path: File.join(FIXTURES, 'a.txt'),
-        parent: FIXTURES,
-        name: 'a.txt',
-        link_info: true
-      ) { file_info }
-    end
 
     it 'lists without group info' do
       expect { subject }.not_to output(/sys/).to_stdout
@@ -518,39 +420,8 @@ RSpec.describe ColorLS::Flags do
     end
   end
 
-  context 'with -G flag in a listing format' do
+  context 'with -G flag in a listing format', :use_file_info_stub do
     let(:args) { ['-l', '-G', "#{FIXTURES}/a.txt"] }
-
-    before do
-      file_info = instance_double(
-        ColorLS::FileInfo,
-        group: 'sys',
-        mtime: Time.now,
-        directory?: false,
-        owner: 'user',
-        name: 'a.txt',
-        show: 'a.txt',
-        nlink: 1,
-        size: 128,
-        blockdev?: false,
-        chardev?: false,
-        socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
-        executable?: false
-      )
-
-      allow(ColorLS::FileInfo).to receive(:new).with(
-        path: File.join(FIXTURES, 'a.txt'),
-        parent: FIXTURES,
-        name: 'a.txt',
-        link_info: true
-      ) { file_info }
-    end
 
     it 'lists without group info' do
       expect { subject }.not_to output(/sys/).to_stdout
@@ -575,8 +446,20 @@ RSpec.describe ColorLS::Flags do
     it { expect { subject }.to output(/#{mtime.strftime("%y-%m-%d %k:%M")}/).to_stdout }
   end
 
-  context 'with --no-hardlinks flag in a listing format' do
+  context 'with --no-hardlinks flag in a listing format', :use_file_info_stub do
     let(:args) { ['-l', '--no-hardlink', "#{FIXTURES}/a.txt"] }
+
+    before do
+      allow(a_txt_file_info).to receive(:nlink).and_return 987
+    end
+
+    it 'lists without hard links count' do
+      expect { subject }.not_to output(/987/).to_stdout
+    end
+  end
+
+  context 'with -L flag in a listing format' do
+    let(:args) { ['-l', '-L', "#{FIXTURES}/a.txt"] }
 
     before do
       file_info = instance_double(
@@ -587,30 +470,38 @@ RSpec.describe ColorLS::Flags do
         owner: 'user',
         name: 'a.txt',
         show: 'a.txt',
-        nlink: 987,
+        nlink: 1,
         size: 128,
         blockdev?: false,
         chardev?: false,
         socket?: false,
-        symlink?: false,
-        stats: instance_double(File::Stat,
-                               mode: 0o444, # read for user, owner, other
-                               setuid?: true,
-                               setgid?: true,
-                               sticky?: true),
+        symlink?: true,
+        hidden?: false,
+        link_target: "#{FIXTURES}/z.txt",
+        dead?: false,
         executable?: false
       )
 
+      allow(ColorLS::FileInfo).to receive(:new).and_call_original
       allow(ColorLS::FileInfo).to receive(:new).with(
         path: File.join(FIXTURES, 'a.txt'),
         parent: FIXTURES,
         name: 'a.txt',
-        link_info: true
+        link_info: true,
+        show_filepath: true
       ) { file_info }
     end
 
-    it 'lists without hard links count' do
-      expect { subject }.not_to output(/987/).to_stdout
+    it 'show information on the destination of symbolic links' do
+      expect { subject }.not_to output(/128/).to_stdout
+    end
+  end
+
+  context 'when argument is a file with relative path' do
+    let(:args) { ["#{FIXTURES}/a.txt"] }
+
+    it 'replicates the filepath provided in the argument' do
+      expect { subject }.to output(/#{args.first}/).to_stdout
     end
   end
 end
